@@ -1,89 +1,107 @@
 import time
+import sys
+from enum import Enum
 from datetime import datetime
 from midealocal.discover import discover
 from midealocal.devices import device_selector
+from midealocal.devices import MideaDevice
 
-# Identifiants
-token = '9da03d4a3d20ae76ae8933549a4d1884a5ca95249dc0d913ecdd7704ae7e16c1351073a3d40e2f749de31e4d15db395d49302699fdf26ac662642db698f60c6c'
-key = 'f5f759ff59954ba59e727e15999716dccb4c2b2fd2a04fb1b26d070ee609197c'
+# {'device_id': 152832117819720, 'type': 172, 'ip_address': '192.168.1.192', 'port
+# ': 6444, 'model': '0L646802', 'sn': '0000AC5410L646802B30708102100000', 'protoco
+# l': 3}
 
-# --- 1. DÉCOUVERTE ET CONNEXION ---
-discover_results = list(discover(ip_address="192.168.1.192").values())[0]
+class PowerState(Enum):
+    ON = "on"
+    OFF = "off"
 
-if isinstance(discover_results, list):
-    d = discover_results[0]
-else:
-    d = discover_results
 
-ac = device_selector(
-  name="AC",
-  device_id=d['device_id'],
-  device_type=d['type'],
-  ip_address=d['ip_address'],
-  port=d['port'],
-  token=token,
-  key=key,
-  device_protocol=d['protocol'],
-  model=d['model'],
-  subtype=0,
-  customize="",
-)
+def _close_device(device: MideaDevice) -> None:
+    print("Closing connection.")
+    try:
+        device.close()
+    except Exception as close_exc:
+        print(f"Warning: failed to close connection: {close_exc}")
 
-ac.connect(check_protocol=True)
-ac.open() # Démarrage de l'écoute
+def find_ac(token: str, key: str)-> MideaDevice|bool:
+    print("Discovering devices on the network...")
+    discover_results = list(discover().values())
 
-print("Connexion en cours, récupération de l'état actuel...")
-time.sleep(5) # On laisse 5 secondes au script pour recevoir l'état actuel de la clim
+    d = {}
 
-# --- 2. RÉCUPÉRATION DES VARIABLES NÉCESSAIRES ---
+    for device in discover_results:
+        if device['device_id'] == 152832117819720:
+            d = device
 
-# L'état actuel de la clim (True = Allumée, False = Éteinte)
-is_on = ac._attributes.get("power")
+    if d == {}:
+        print("No device found on the network! ")
+        return False
 
-# La date et l'heure actuelles
-maintenant = datetime.now()
-heure_actuelle = maintenant.hour
-jour_semaine = maintenant.weekday() # 0 = Lundi, 1 = Mardi... 5 = Samedi, 6 = Dimanche
+    print("Device found: " + d['model'] + " with IP " + d['ip_address'])
 
-# Variable de présence (À remplacer par votre vrai système de détection)
-personne_au_bureau = True 
+    return device_selector(
+      name="AC",
+      device_id=d['device_id'],
+      device_type=d['type'],
+      ip_address=d['ip_address'],
+      port=d['port'],
+      token=token,
+      key=key,
+      device_protocol=d['protocol'],
+      model=d['model'],
+      subtype=0,
+      customize="",
+    )
 
-print(f"-> Il est {heure_actuelle}h")
-print(f"-> Jour de la semaine : {jour_semaine} (0=Lundi, 6=Dimanche)")
-print(f"-> État de la clim : {'Allumée' if is_on else 'Éteinte'}")
-print("-" * 30)
+def change_state_power_ac(device: MideaDevice, state: PowerState) -> None:
+    desired_on = state is PowerState.ON
+    opened = False
 
-# --- 3. LOGIQUE CONDITIONNELLE ---
+    try:
+        device.connect(check_protocol=True)
+        device.open()
+        opened = True
 
-# Condition A : S'il n'y a personne au bureau, on éteint la clim
-if not personne_au_bureau:
-    if is_on: # Inutile d'envoyer la commande si elle est déjà éteinte
-        print("Action : Personne au bureau détecté. Extinction de la clim.")
-        ac.set_attribute("power", False)
+        print("Connecting to the device, retrieving current state...")
+        time.sleep(5)
+
+        is_on = bool(device._attributes.get("power"))
+        if is_on == desired_on:
+            print(f"AC is already {state.value}")
+            return
+
+        device.set_attribute("power", desired_on)
         time.sleep(2)
-    else:
-        print("Personne au bureau, mais la clim est déjà éteinte.")
+        print(f"The state of the AC has been changed successfully to {state.value}")
+    except Exception as exc:
+        if opened == False:
+            print("Failed to connect to the device.")
+        else:
+            print(f"Failed to change AC power state ({state.value}): {exc}")
+        raise
+    finally:
+        if opened:
+            _close_device(device)
 
-# Condition B : Si elle est allumée et qu'il est 12h (entre 12h00 et 12h59) on éteint
-elif is_on and heure_actuelle == 12:
-    print("Action : Il est midi, c'est la pause. Extinction de la clim.")
-    ac.set_attribute("power", False)
-    time.sleep(2)
+def main():
+    state = sys.argv[1]
 
-# Condition C : S'il est 9h (entre 9h00 et 9h59) ET jour de semaine (0 à 4 = Lundi à Vendredi) on allume
-elif heure_actuelle == 9 and jour_semaine < 5:
-    if not is_on: # Inutile de l'allumer si elle tourne déjà
-        print("Action : Il est 9h en semaine. Allumage de la clim.")
-        ac.set_attribute("power", True)
-        time.sleep(2)
-    else:
-        print("Il est 9h en semaine, mais la clim est déjà allumée.")
+    try:
+        state = PowerState(state)
+    except ValueError:
+        print("Parameter does not exist.")
+        return 
 
-# Si aucune condition n'est remplie
+    device = find_ac(
+    token= '9da03d4a3d20ae76ae8933549a4d1884a5ca95249dc0d913ecdd7704ae7e16c1351073a3d40e2f749de31e4d15db395d49302699fdf26ac662642db698f60c6c',
+    key= 'f5f759ff59954ba59e727e15999716dccb4c2b2fd2a04fb1b26d070ee609197c'
+    )
+
+    if isinstance(device, MideaDevice) == False:
+        return
+
+    change_state_power_ac(device, state)
+
+if len(sys.argv) == 2:
+    main()
 else:
-    print("Aucune action n'est requise à cette heure-ci.")
-
-
-# --- 4. FERMETURE PROPRE ---
-print("Fermeture de la connexion.")
-ac.close()
+    print("Usage: python control-midea.py <on|off>")

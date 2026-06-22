@@ -6,6 +6,9 @@ from midealocal.discover import discover
 from midealocal.devices import device_selector
 from midealocal.devices import MideaDevice
 
+if sys.version_info < (3, 12):
+    raise RuntimeError("Python 3.12+ required")
+
 # {'device_id': 152832117819720, 'type': 172, 'ip_address': '192.168.1.192', 'port
 # ': 6444, 'model': '0L646802', 'sn': '0000AC5410L646802B30708102100000', 'protoco
 # l': 3}

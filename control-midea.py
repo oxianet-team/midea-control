@@ -32,11 +32,12 @@ def find_ac(token: str, key: str)-> MideaDevice|bool:
     d = {}
 
     for device in discover_results:
+        print(f"Device with ID {device['device_id']} found on the network")
         if device['device_id'] == 152832117819720:
             d = device
 
     if d == {}:
-        print("No device found on the network! ")
+        print("The asked device was not found on the network!")
         return False
 
     print("Device found: " + d['model'] + " with IP " + d['ip_address'])
@@ -60,7 +61,10 @@ def change_state_power_ac(device: MideaDevice, state: PowerState) -> None:
     opened = False
 
     try:
-        device.connect(check_protocol=True)
+        if not device.connect(check_protocol=True):
+            print("Failed to connect to the device.")
+            return
+
         device.open()
         opened = True
 
